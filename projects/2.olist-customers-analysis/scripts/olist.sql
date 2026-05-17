@@ -149,3 +149,90 @@ SELECT
     COUNT(DISTINCT customer_state) AS state_count,
     COUNT(DISTINCT customer_city) AS city_count
 FROM tb_customers_cleaned;
+
+
+
+--------------------------------------------------关于表olist_sellers_dataset.csv-----------------------------------
+-- 创建卖家表
+CREATE TABLE IF NOT EXISTS olist_sellers_dataset (
+    seller_id STRING COMMENT '卖家唯一标识',
+    seller_zip_code_prefix STRING COMMENT '卖家邮编前缀',
+    seller_city STRING COMMENT '卖家城市',
+    seller_state STRING COMMENT '卖家州'
+)
+ROW FORMAT SERDE 'org.apache.hadoop.hive.serde2.OpenCSVSerde'
+WITH SERDEPROPERTIES (
+    "separatorChar" = ",",
+    "quoteChar" = "\"",
+    "escapeChar" = "\\"
+)
+STORED AS TEXTFILE
+TBLPROPERTIES ("skip.header.line.count"="1");
+
+-- 加载数据
+LOAD DATA INPATH '/archive/olist_sellers_dataset.csv' 
+OVERWRITE INTO TABLE olist_sellers_dataset;
+
+-- 1. 卖家总数
+CREATE TABLE tb_rs_total_sellers COMMENT '卖家总数统计' AS
+SELECT COUNT(DISTINCT seller_id) AS total_sellers 
+FROM olist_sellers_dataset;
+
+-- 2. 城市分布统计（Top 20）
+CREATE TABLE tb_rs_seller_city_distribution COMMENT '卖家城市分布TOP20' AS
+SELECT 
+    seller_state,
+    seller_city,
+    COUNT(DISTINCT seller_id) AS seller_count
+FROM olist_sellers_dataset
+GROUP BY seller_state, seller_city
+ORDER BY seller_count DESC
+LIMIT 20;
+
+-- 3. 各州卖家分布（含百分比）
+CREATE TABLE tb_rs_seller_state_distribution COMMENT '各州卖家分布及占比' AS
+SELECT 
+    seller_state,
+    COUNT(DISTINCT seller_id) AS seller_count,
+    ROUND(COUNT(DISTINCT seller_id) * 100.0 / (SELECT COUNT(DISTINCT seller_id) FROM olist_sellers_dataset), 2) AS percentage
+FROM olist_sellers_dataset
+GROUP BY seller_state
+ORDER BY seller_count DESC;
+
+-- 4. 卖家最集中的TOP10城市
+CREATE TABLE tb_rs_top10_seller_cities COMMENT '卖家最集中的TOP10城市' AS
+SELECT 
+    seller_city,
+    seller_state,
+    COUNT(DISTINCT seller_id) AS seller_count
+FROM olist_sellers_dataset
+GROUP BY seller_city, seller_state
+ORDER BY seller_count DESC
+LIMIT 10;
+
+-- 5. 卖家密度分析（同一邮编前缀的卖家数）
+CREATE TABLE tb_rs_seller_zip_density COMMENT '卖家密度分析-按邮编前缀' AS
+SELECT 
+    seller_zip_code_prefix,
+    COUNT(DISTINCT seller_id) AS seller_count
+FROM olist_sellers_dataset
+GROUP BY seller_zip_code_prefix
+ORDER BY seller_count DESC
+LIMIT 20;
+
+-- 6. 空值检查统计
+CREATE TABLE tb_rs_null_check_sellers COMMENT '卖家表空值检查' AS
+SELECT 
+    SUM(CASE WHEN seller_id IS NULL OR seller_id = '' THEN 1 ELSE 0 END) AS null_seller_id,
+    SUM(CASE WHEN seller_zip_code_prefix IS NULL OR seller_zip_code_prefix = '' THEN 1 ELSE 0 END) AS null_zip,
+    SUM(CASE WHEN seller_city IS NULL OR seller_city = '' THEN 1 ELSE 0 END) AS null_city,
+    SUM(CASE WHEN seller_state IS NULL OR seller_state = '' THEN 1 ELSE 0 END) AS null_state,
+    COUNT(*) AS total_rows
+FROM olist_sellers_dataset;
+
+-- 7. 重复卖家检查
+CREATE TABLE tb_rs_dup_sellers COMMENT '重复卖家检查' AS
+SELECT seller_id, COUNT(*) AS dup_count
+FROM olist_sellers_dataset
+GROUP BY seller_id
+HAVING COUNT(*) > 1;
